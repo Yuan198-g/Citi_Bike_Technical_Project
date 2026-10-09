@@ -1,0 +1,14 @@
+{
+  "real_files": [
+    "JC-202508-citibike-tripdata.csv.zip",
+    "JC-202509-citibike-tripdata.csv.zip"
+  ],
+  "rerun_total": 224432,
+  "analysis_month": "202509",
+  "analysis_trips": 116017,
+  "baseline_rows": 39816,
+  "automated_checks_passed": 16,
+  "six_export_totals_reconciled": true,
+  "failure_detection_test": "Passed: intentionally removing an arrival auxiliary row from an in-memory copy fails validation",
+  "unit_tests": "2 methods passed; synthetic fixtures"
+}

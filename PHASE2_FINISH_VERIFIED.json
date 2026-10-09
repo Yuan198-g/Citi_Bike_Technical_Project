@@ -1,0 +1,14 @@
+{
+  "verified_at": "2026-10-09T22:03:46.784774+00:00",
+  "unit_tests": "3 dashboard tests passed; 5 collector tests previously passed",
+  "javascript_syntax": "Node syntax check passed",
+  "http_read": "HTTP dashboard HTML and state endpoint passed",
+  "live_update": "Real official collector wrote a new poll; next HTTP read returned it",
+  "before_successful_polls": 3,
+  "after_successful_polls": 4,
+  "before_poll_at": "2026-10-09T18:10:53.236061+00:00",
+  "after_poll_at": "2026-10-09T22:03:46.752392+00:00",
+  "after_snapshot_rows": 327,
+  "after_fresh_stations": 107,
+  "browser_visual_and_timer_verification": "Pending local browser acceptance; browser executable could not be downloaded in this environment. No screenshot or rendered-browser success is claimed."
+}

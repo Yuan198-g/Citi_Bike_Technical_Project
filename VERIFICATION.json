@@ -1,0 +1,24 @@
+{
+  "live_source_file": "JC-202509-citibike-tripdata.csv.zip",
+  "sampled": false,
+  "first_run": {
+    "raw": 116071,
+    "inserted": 116033,
+    "rejected": 38,
+    "duplicates": 0,
+    "conflicts": 0
+  },
+  "rerun_total": 116033,
+  "daily_aggregate_total": 116033,
+  "date_range": [
+    "2025-08-31",
+    "2025-09-30"
+  ],
+  "rejection_reasons": [
+    [
+      "duration_outside_0_to_24_hours",
+      38
+    ]
+  ],
+  "test_status": "2 unittest test methods passed; fixtures are synthetic, not live rides"
+}

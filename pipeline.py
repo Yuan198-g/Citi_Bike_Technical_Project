@@ -185,19 +185,5 @@ def main():
     path, url = download(args.month,ROOT)
     print(json.dumps(ingest(path,ROOT,url),indent=2))
 
-    sql_path = ROOT / "baseline.sql"
-    db = connect(ROOT)
-    try:
-        db.executescript(sql_path.read_text(encoding="utf-8-sig"))
-        rows = db.execute(
-            "SELECT COUNT(*) FROM station_hourly_baseline_202509"
-        ).fetchone()[0]
-        print(f"Historical baseline ready: {rows} rows")
-    finally:
-        db.close()
-
-
-
-
 if __name__ == '__main__':
     main()

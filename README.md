@@ -1,106 +1,202 @@
-# Citi Bike — 第一阶段：历史数据流程
+# Citi Bike Operations and Analytics
 
-## 先运行
+A local dashboard for historical trip analysis and station inventory monitoring. It uses public Citi Bike monthly trip files and GBFS 2.3 station feeds for Jersey City / Hoboken.
 
-安装 Python 3.10 或更新版本。在 Windows 上安装时区数据库：
+## 1. Understand the two data sources
 
-```bash
-python -m pip install tzdata
+| Data | Default period | Used for | How to update |
+|---|---|---|---|
+| Historical trips | August and September 2025; September is selected for analysis | Historical analytics and the demand baseline | Run historical processing for the required month |
+| Station snapshots | The time you run the collector | Bikes, docks, operational status and inventory history | Run `poll_stations.py` |
+
+Live collection does **not** change Historical analytics. The dashboard's `--baseline-month` selects both the historical charts and the historical demand used in the inventory comparison. It is not hard-coded to September, but the selected month's data and baseline must already exist.
+
+The inventory comparison is a rule-based reference, not a validated shortage prediction. Using 2025 demand with 2026 inventory has year/season limitations.
+
+## 2. Set up and run for the first time
+
+Use Python 3.10 or newer. Keep all project scripts and `workflow.json` in the same directory as the intended `data` folder. Run commands from that project directory.
+
+```powershell
+python -m pip install -r requirements.txt
+python workflow.py batch
+python poll_stations.py --cycles 3 --interval 60
+python workflow.py check
+python platform_dashboard.py --baseline-month 202509
 ```
 
-解压后，用 VS Code 打开 `citi_bike_phase1` 文件夹，在终端运行：
+Open http://127.0.0.1:8502. Keep the dashboard terminal open; closing it stops the page service. The collector finishes after three cycles. The final check should end with `FINAL CHECKS PASSED`.
 
-```bash
-python pipeline.py --month 202509
+Already have data? Keep your existing `data` folder. You do not need to run the historical batch again just to open the page. Check the database paths printed at dashboard startup: a parent project folder and its nested `citi_bike_phase1` folder are different data roots.
+
+## 3. Daily use: open the page and collect inventory
+
+Terminal 1:
+
+```powershell
+python platform_dashboard.py --baseline-month 202509
 ```
 
-程序自动下载 Jersey City / Hoboken 的月度 ZIP，处理其中所有 CSV，不采样。
-第一次会下载数据。第二次运行同一命令，应该显示 `already_processed`，总数不变。
-换月份，例如 `--month 202510`，会追加新文件，旧文件不重建。
-下载失败会最多尝试三次；404 时请核对官方文件列表，不要把失败当成空月份。
+Terminal 2, from the same project directory:
 
-## 文件分别做什么
-
-- `pipeline.py`：下载、清洗、验证、入库、更新汇总视图。
-- `queries.sql`：练习查询每天、小时、站点、会员、车型和异常记录。
-- `test_pipeline.py`：用人工样例验证去重、冲突、增量、失败回滚和夏令时。
-- `VERIFICATION.json`：作者实际运行官方历史文件得到的验证证据。
-
-运行后生成：
-
-- `data/raw/YYYYMM/`：原始 ZIP，按来源月份组织，保留所有原始字段。
-- `data/citibike.sqlite`：处理后的数据库。
-- `data/reports/`：每个来源文件的处理计数 JSON，以及每日骑行数 CSV。
-
-这个下载包只包含代码与验证证据，不包含原始数据和数据库；它们会在本机运行后生成。
-
-## 查看运行结果
-
-先打开 `data/reports/trips_daily.csv`。再用 VS Code 的 SQLite 查看工具或 DB Browser for SQLite 打开数据库，执行 `queries.sql`。
-例如：
-
-```sql
-SELECT local_date, trips FROM trips_daily ORDER BY local_date;
-SELECT local_hour, COUNT(*) AS trips
-FROM fact_trip GROUP BY local_hour ORDER BY local_hour;
+```powershell
+python poll_stations.py --cycles 3 --interval 60
 ```
 
-理解这两条查询后，再读 `pipeline.py` 的三个主要函数：
-`download()` 获取并保留数据；`normalize()` 验证一条骑行；`ingest()` 处理整个文件并入库。
+For continuous collection until you press Ctrl+C:
 
-## 数据规则与模型
-
-来源：https://citibikenyc.com/system-data
-文件：https://s3.amazonaws.com/tripdata/JC-202509-citibike-tripdata.csv.zip
-范围：JC 来源文件覆盖的 Jersey City / Hoboken 骑行，不声称代表纽约整个网络。
-不按地理坐标裁剪，坐标只做区域合理性验证。不按文件月份删除跨月骑行。
-真实有效记录的开始日期范围为 2025-08-31 至 2025-09-30。
-后续实时指标必须选择对应地区，并单独验证站点编号映射。
-
-- `fact_trip`：一行一条骑行，主键 `ride_id`；站点编号始终保留为字符串。
-- `trip_arrival_time`：一行一个已接受 ride_id，保存结束时的当地日期和小时；与 fact_trip 一对一。
-- `processed_files`：一行一个 ZIP 内容 SHA-256，保留来源 URL、处理时间和分类计数。
-- `rejected_records`：一行一个被隔离的来源记录，保留文件摘要、CSV 名、行号、原因和原始 JSON。
-- `trips_daily`：一行一个当地日期。
-- `station_departures_hourly` / `station_arrivals_hourly`：一行一个站点、当地日期、小时。
-
-聚合使用 SQL 视图，始终查询当前事实表；增加月份只处理新文件，查询时计算汇总。
-SQLite 是本地单写入者方案，不是大规模数据仓库；扩大到纽约多个月时应重新评估 DuckDB 等工具。
-
-时间处理：本版明确假设无时区的原始时间属于 `America/New_York`，不是 UTC。
-官方页面未明确规定这些时间的时区，因此这是实现假设，需要在最终技术报告中注明并进一步核实。
-保存 UTC 时间，统计纽约当地日期、小时和星期；星期一=0，星期日=6。
-夏令时重复或不存在的时间被隔离，不随意选择一个解释。
-Windows 通常需要 tzdata 包。
-
-质量规则：
-
-- ride_id 必须存在；文件缺少必需列时整个文件失败。
-- 时长必须大于0、不超过24小时。这是本项目的明确筛选规则，不声称所有超时骑行都错误。
-- 可用坐标必须在纬度40–42、经度-75至-72范围内；缺失坐标允许保留。
-- 缺失站点编号变成 NULL，骑行仍可用于总量分析；站点汇总排除缺失端点。
-- 未知会员/车型类别保留原值，不自动删除。
-- 文件 SHA-256 已处理时跳过；相同 ride_id 和相同标准化字段只计一次。
-- 同 ride_id 但标准化字段不同：保留先入库的记录，后续冲突记录隔离。原始非模型字段仍保存在 ZIP 中。
-- 一整个 ZIP 的入库与处理清单写入在同一事务中，失败回滚，重启可重试。
-- 已缓存原文件不会每次重新下载；此版不自动检测远端同名文件更新。若需处理修订版本，应先另存原文件并提供新版文件；本版不实现事实记录修订。
-- 报告 CSV/JSON 属于派生输出；数据库事务是权威状态。报告写入失败不回滚已提交数据。
-
-计数满足：原始数 = 新增数 + 无效数 + 相同重复数 + 冲突数。
-
-## 实际验证
-
-真实历史文件：116071 条原始，116033 条接受，38 条时长不符合规则；0 条重复、0 条冲突。
-有效记录中 450 条缺少终点编号。重复运行后事实表仍为116033行，每日汇总总数也是116033。
-
-在本文件夹运行测试：
-
-```bash
-python -m unittest -v
+```powershell
+python poll_stations.py --cycles 0 --interval 60
 ```
 
-测试使用人工样例，与真实历史数据验证分开。
+The page reads the database every 10 seconds. The collector retrieves source data about every 60 seconds, or longer when feed TTL requires it. Reading the page does not append database records; collecting does. Stop continuous collection when the demo ends because raw files and snapshots accumulate.
 
-## 尚未完成的阶段
+- **Recorded snapshots:** retained inventory and a demand comparison evaluated at the last successful poll. It is not current availability. Source-age badges still show present-time age.
+- **Current operations:** fresh operating stations contribute to current totals. Old, restricted or unreliable records cannot produce current pressure signals.
+- **Latest successful poll:** when collection last succeeded. **Page data refresh:** when the browser last read the database. Only the second can change while collection is stopped.
+- **Attention / unavailable only:** hides `no_threshold_trigger` rows. Uncheck it to see all comparison rows, including JC009 if no threshold was triggered.
 
-本版只完成历史数据核心流程。实时轮询、站点 crosswalk、需求基线、Dashboard、自动调度和完整架构说明将在后续阶段完成。
+Historical charts and baselines are cached at dashboard startup. After changing historical data, stop the dashboard with Ctrl+C and restart it. Live inventory does not require a restart.
+
+## 4. Add July and use it as the baseline
+
+First download, process and build the July 2025 baseline:
+
+```powershell
+python run_phase1.py --months 202507 --analysis-month 202507
+```
+
+This adds July while retaining existing August/September trips. Reports are saved in `data/reports/202507/`.
+
+Stop the running dashboard with Ctrl+C, then start it with July selected:
+
+```powershell
+python platform_dashboard.py --baseline-month 202507
+```
+
+Historical analytics now shows July, and the inventory comparison uses July weekday/hour demand. Inventory still comes from the live collector. To return to September, restart with `--baseline-month 202509`.
+
+Changing only the dashboard parameter is enough **if that month's data and baseline have already been prepared**. Otherwise run the historical command first. Use six digits without spaces: `202507` means July 2025. A month not yet published by the source cannot be downloaded; the program does not generate it.
+
+A one-time July import does not change `workflow.json`. To make batch scheduling and final checks use July too, change its `months` and `analysis_month` as explained below.
+
+## 5. Main files
+
+| File | Purpose | When to use |
+|---|---|---|
+| `run_phase1.py` | Download selected historical months, ingest trips, build a baseline, validate and export reports | Add a month or refresh historical reports |
+| `pipeline.py` | Historical download, cleaning, deduplication and database logic | Called by the historical runner; usually no direct use |
+| `poll_stations.py` | Retrieve GBFS information/status and save inventory snapshots | Get fresh inventory |
+| `platform_dashboard.py` | Integrated inventory, demand comparison and historical page | Main dashboard entry point |
+| `operations_dashboard.py` | Original inventory-only page and shared page code | Keep it: the integrated dashboard imports it; normally use `platform_dashboard.py` |
+| `compare_inventory.py` | Check station mappings and export demand/inventory comparisons | View or share CSV results without the page; also imported by the dashboard |
+| `workflow.py` | Batch execution, daily batch scheduling and final checks | Use `batch`, `schedule` or `check` |
+| `workflow.json` | Historical months, analysis month, schedule and batch retry settings | Edit batch defaults |
+| `test_*.py` | Small synthetic tests for transformations, failures and workflow behavior | Run through `workflow.py check`; test data is separate from business data |
+| `requirements.txt` | Windows timezone dependency | Initial installation |
+| `TECHNICAL_DESIGN.md` | Architecture, model, rules, assumptions and recovery | Technical review |
+| `EVIDENCE.md` | Existing verification notes and submission evidence guidance | Prepare submission |
+
+## 6. Parameters you can change
+
+### Historical processing and the dashboard
+
+| Command | Parameter | Meaning |
+|---|---|---|
+| `run_phase1.py` | `--months 202507 202508` | Historical files to ingest; old accepted trips remain |
+| `run_phase1.py` | `--analysis-month 202507` | Month whose baseline and reports are generated; this month is also downloaded/ingested if necessary |
+| `platform_dashboard.py` | `--baseline-month 202507` | Select historical charts and demand baseline |
+| `platform_dashboard.py` | `--port 8503` | Change page port if 8502 is occupied; open the matching URL |
+| `platform_dashboard.py` | `--root "C:\path\to\project"` | Read databases/raw inputs from an explicit project directory |
+| `compare_inventory.py` | `--baseline-month 202507` | Select the exported comparison's historical baseline |
+| `compare_inventory.py` | `--recorded` | Evaluate at the last stored poll; omit to evaluate current freshness |
+| `compare_inventory.py` | `--root "C:\path\to\project"` | Select the project data directory |
+
+`run_phase1.py` and `poll_stations.py` use the directory containing their scripts as the data root. They do not accept `--root`. Keep them beside the intended `data` folder instead of assuming that changing the terminal directory changes their storage location.
+
+### Live collection
+
+| Parameter | Default | Meaning |
+|---|---:|---|
+| `--cycles` | 3 | Number of polls; 0 continues until Ctrl+C |
+| `--interval` | 60 | Requested seconds between polls; minimum 30; source TTL may increase it |
+| `--stale-after` | 300 | Source freshness threshold in seconds; minimum 30 |
+| `--low-bikes` | 3 | Flag a station when available bikes are at or below this value |
+| `--low-docks` | 3 | Flag a station when available docks are at or below this value |
+
+Example with different thresholds:
+
+```powershell
+python poll_stations.py --cycles 3 --interval 60 --stale-after 300 --low-bikes 5 --low-docks 5
+```
+
+Thresholds are saved with new snapshots; this command does not rewrite old records. The dashboard's 10-second read interval is fixed in the current code and has no command-line parameter.
+
+### Batch configuration
+
+Default `workflow.json`:
+
+```json
+{
+  "months": ["202508", "202509"],
+  "analysis_month": "202509",
+  "daily_at_utc": "02:00",
+  "batch_attempts": 3,
+  "retry_seconds": 10
+}
+```
+
+For July analysis while keeping all three months configured, change `months` to `["202507", "202508", "202509"]` and `analysis_month` to `"202507"`. The analysis month must be in the configured months list. `batch_attempts` accepts 1–5; `retry_seconds` accepts 0–60. Dashboard parameters are independent of this configuration: start the page with the month you want to display.
+
+## 7. Scheduling: optional for normal viewing
+
+```powershell
+python workflow.py schedule
+```
+
+This schedules **historical batch processing only**. It does not collect live inventory or restart the dashboard. With fixed data and unchanged code, rerunning usually produces the same historical results.
+
+`daily_at_utc` uses UTC, not the browser's display timezone. Keep the scheduler terminal and computer running. If started after today's configured time, it runs once if today has not already been attempted. It does not catch up all missed days or automatically discover new months. Restart it after editing configuration.
+
+Logs are in `data/logs/`; the last scheduled attempt is in `data/scheduler_state.json`. Failed/interrupted days are not automatically repeated after restart. Inspect the log and retry manually with:
+
+```powershell
+python workflow.py batch
+```
+
+No Windows service is installed. For ordinary live dashboard use, run only the dashboard and collector.
+
+## 8. Reports, checks and common problems
+
+```powershell
+python workflow.py check
+```
+
+This runs 20 tests, 16 historical checks, 6 operational checks, a recorded comparison export and integrated serving calculations. It uses `workflow.json`'s analysis month. It does not collect/download and does not visually test the browser. Correctly labeled stale data and retained quality warnings can coexist with a passing report.
+
+| Output | Location |
+|---|---|
+| Historical CSVs, baseline, coverage summary | `data/reports/YYYYMM/` |
+| Historical check details | `data/reports/YYYYMM/validation.json` |
+| Mapping and inventory comparison CSVs | `data/reports/phase3/YYYYMM/recorded/` or `current/` |
+| Complete acceptance report | `data/reports/final_acceptance.json` |
+| Latest collector summary at capture time | `data/reports/live/collection_summary.json` |
+| Batch retry/error logs | `data/logs/` |
+| Historical / operational databases | `data/citibike.sqlite` / `data/operations.sqlite` |
+| Original inputs | `data/raw/` and `data/raw_live/` |
+
+CSV files can be opened in Excel; JSON/log files can be opened in a text editor. Reports are files, not new DBeaver tables. Scheduled batches update historical reports/checks; only `workflow.py check` generates the complete acceptance report.
+
+| Problem | What to do |
+|---|---|
+| Script not found | Enter the folder containing the script |
+| Database/raw ZIP missing | Check the printed data paths; prepare the historical month and collect inventory first |
+| Baseline missing for a month | Run `run_phase1.py` with that `--analysis-month` |
+| Current totals are empty / all stations stale | Run the collector; page refresh alone does not fetch inventory |
+| Historical charts did not change | Restart the dashboard with the intended `--baseline-month` |
+| Port already in use | Stop the old server or choose another `--port` |
+| Windows database lock | Close interfering editors and use one writer per database |
+
+For submission, include code/configuration, documentation, your final acceptance report and your own page screenshots. The default `.gitignore` excludes `data/`; copy selected evidence into an `evidence/` folder if uploading to GitHub. Preserve local raw data and databases. See technical design for limitations and recovery details.
+
+Official sources: [Citi Bike System Data](https://citibikenyc.com/system-data) and [GBFS reference](https://gbfs.org/documentation/reference/).

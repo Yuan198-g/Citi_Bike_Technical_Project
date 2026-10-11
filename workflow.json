@@ -1,0 +1,7 @@
+{
+  "months": ["202508", "202509"],
+  "analysis_month": "202509",
+  "daily_at_utc": "02:00",
+  "batch_attempts": 3,
+  "retry_seconds": 10
+}
